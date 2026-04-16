@@ -260,26 +260,31 @@ class PKGViewerApp(DragDropCTk):
 
                 entry_size = 32
                 raw_table = None
+                main_key = None
                 used_key_name = ""
 
                 if self.pkg_type == PKG_RELEASE_TYPE_DEBUG:
-                    candidate = decrypt_data_blocks(f, self.data_offset, 0, file_count * entry_size, None, self.klicensee, self.pkg_type, self.qa_digest)
-                    if file_count > 0:
-                        n_off, n_sz, _, _, _, _ = struct.unpack('>I I Q Q I I', candidate[:32])
-                        if n_sz < 256:
-                            raw_table = candidate
-                            used_key_name = "Debug"
+                    main_key = None
+                    used_key_name = "Debug"
+                    raw_table = decrypt_data_blocks(f, self.data_offset, 0, file_count * entry_size, None, self.klicensee, self.pkg_type, self.qa_digest)
                 else:
-                    potential_keys = [(PKG_PS3_AES_KEY, "PS3 Retail"), (PKG_PS3_IDU_AES_KEY, "PS3 IDU")]
-                    if pkg_platform == PKG_PLATFORM_TYPE_PSP_PSVITA: 
-                        potential_keys = [(PKG_PSP_AES_KEY, "PSP Retail"), (PKG_PSP_IDU_AES_KEY, "PSP IDU"), (PKG_PSP2_AES_KEY, "PS Vita Retail"), (PKG_PSP2_LIVEAREA_AES_KEY, "PS Vita Live Area")]
+                    potential_keys = [
+                        (PKG_PS3_AES_KEY, "PS3 Retail"),
+                        (PKG_PSP2_AES_KEY, "PS Vita Retail"),
+                        (PKG_PSP2_LIVEAREA_AES_KEY, "PS Vita Live Area"),
+                        (PKG_PSP_AES_KEY, "PSP Retail"),
+                        (PKG_PS3_IDU_AES_KEY, "PS3 IDU"),
+                        (PKG_PSP_IDU_AES_KEY, "PSP IDU"),
+                        (PKG_PSM_AES_KEY, "PS Mobile")
+                    ]
 
                     for key, kname in potential_keys:
                         candidate = decrypt_data_blocks(f, self.data_offset, 0, file_count * entry_size, key, self.klicensee, self.pkg_type, self.qa_digest)
                         if file_count > 0:
                             n_off, n_sz, _, _, _, _ = struct.unpack('>I I Q Q I I', candidate[:32])
-                            if n_sz < 256: 
+                            if n_sz > 0 and n_sz < 512 and n_off < pkg_size:
                                 raw_table = candidate
+                                main_key = key
                                 used_key_name = kname
                                 break
 
@@ -291,34 +296,24 @@ class PKGViewerApp(DragDropCTk):
                 for i in range(file_count):
                     e_raw = raw_table[i*entry_size : (i+1)*entry_size]
                     n_off, n_sz, f_off, f_sz, f_type, _ = struct.unpack('>I I Q Q I I', e_raw)
-                    if n_sz == 0: continue
-
-                    key = None
-                    if self.pkg_type == PKG_RELEASE_TYPE_RELEASE:
-                        possible_keys = [
-                            (PKG_PSP_IDU_AES_KEY if used_key_name == "PSP IDU" else PKG_PSP_AES_KEY),
-                            (PKG_PS3_IDU_AES_KEY if used_key_name == "PS3 IDU" else PKG_PS3_AES_KEY),
-                            (PKG_PSP2_LIVEAREA_AES_KEY if used_key_name == "Live Area" else PKG_PSP2_AES_KEY)
-                        ]
-
-                        for test_key in possible_keys:
-                            name_raw = decrypt_data_blocks(f, self.data_offset, n_off, n_sz, test_key, self.klicensee, self.pkg_type, self.qa_digest)
+                    if n_sz == 0: continue  
+                    name_raw = decrypt_data_blocks(f, self.data_offset, n_off, n_sz, main_key, self.klicensee, self.pkg_type, self.qa_digest)
+                    try:
+                        full_path = name_raw.decode('utf-8').strip('\x00').replace("\\", "/")
+                        if not all(31 < ord(c) < 127 or c in "/._- " for c in full_path[:min(len(full_path), 10)]):
+                            raise ValueError("Bad name")
+                        current_file_key = main_key
+                    except:
+                        current_file_key = main_key
+                        for test_key, _ in potential_keys:
+                            name_raw_alt = decrypt_data_blocks(f, self.data_offset, n_off, n_sz, test_key, self.klicensee, self.pkg_type, self.qa_digest)
                             try:
-                                decoded_name = name_raw.decode('utf-8').strip('\x00')
-                                if all(31 < ord(c) < 127 or c in "/._-" for c in decoded_name):
-                                    key = test_key
-                                    full_path = decoded_name.replace("\\", "/")
+                                decoded_alt = name_raw_alt.decode('utf-8').strip('\x00').replace("\\", "/")
+                                if all(31 < ord(c) < 127 or c in "/._- " for c in decoded_alt[:min(len(decoded_alt), 10)]):
+                                    full_path = decoded_alt
+                                    current_file_key = test_key
                                     break
-                            except:
-                                continue
-
-                        if key is None:
-                            key = possible_keys[0]
-                            name_raw = decrypt_data_blocks(f, self.data_offset, n_off, n_sz, key, self.klicensee, self.pkg_type, self.qa_digest)
-                            full_path = name_raw.decode('utf-8', errors='ignore').strip('\x00').replace("\\", "/")
-                    else:
-                        name_raw = decrypt_data_blocks(f, self.data_offset, n_off, n_sz, None, self.klicensee, self.pkg_type, self.qa_digest)
-                        full_path = name_raw.decode('utf-8', errors='ignore').strip('\x00').replace("\\", "/")
+                            except: continue
 
                     parts = [p for p in full_path.split('/') if p]
                     parent = ""
@@ -328,12 +323,11 @@ class PKGViewerApp(DragDropCTk):
 
                         if current_path not in folders:
                             if is_last and (f_type & 0xFF) not in (4, 0x12):
-                                sz_str = f"{f_sz/1048576:.2f} MB" if f_sz > 1048576 else f"{f_sz/1024:.1f} KB"
+                                sz_str = self.format_size(f_sz)
                                 node = self.tree.insert(parent, "end", text=part, values=(sz_str, "File"))
-                                entry_data = {'path': full_path, 'off': f_off, 'sz': f_sz, 'key': key}
-                                self.file_entries[node] = entry_data
+                                self.file_entries[node] = {'path': full_path, 'off': f_off, 'sz': f_sz, 'key': current_file_key}
                                 if full_path.endswith("PARAM.SFO"):
-                                    sfo_entry = entry_data
+                                    sfo_entry = self.file_entries[node]
                             else:
                                 node = self.tree.insert(parent, "end", text=part, values=("", "Folder"))
                                 folders[current_path] = node
