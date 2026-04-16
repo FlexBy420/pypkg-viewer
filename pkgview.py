@@ -3,6 +3,7 @@ import os
 import sys
 import struct
 import threading
+import hashlib
 import customtkinter as ctk
 from tkinter import ttk, filedialog, messagebox
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -32,21 +33,47 @@ PKG_PSP2_LIVEAREA_AES_KEY = bytes.fromhex("423ACA3A2BD5649F9686ABAD6FD8801F")
 PKG_PSM_AES_KEY = bytes.fromhex("AF07FD59652527BAF13389668B17D9EA")
 PKG_FILE_ENTRY_PSP = 0x10000000
 
-def decrypt_data_blocks(file, data_offset, relative_offset, size, key, klicensee):
+PKG_RELEASE_TYPE_DEBUG = 0x0000
+PKG_RELEASE_TYPE_RELEASE = 0x8000
+
+PKG_PLATFORM_TYPE_PS3 = 0x0001
+PKG_PLATFORM_TYPE_PSP_PSVITA = 0x0002
+
+def get_debug_keystream_block(qa_digest, block_index):
+    qa_0 = qa_digest[0:8]
+    qa_1 = qa_digest[8:16]
+    buffer = bytearray(64)
+    buffer[0:8]   = qa_0 # input[0]
+    buffer[8:16]  = qa_0 # input[1]
+    buffer[16:24] = qa_1 # input[2]
+    buffer[24:32] = qa_1 # input[3]
+    buffer[56:64] = struct.pack(">Q", block_index)
+
+    return hashlib.sha1(buffer).digest()[:16]
+
+def decrypt_data_blocks(file, data_offset, relative_offset, size, key, klicensee, pkg_type, qa_digest):
     if size <= 0: return b""
     block_offset = relative_offset // 16
     byte_offset = relative_offset % 16
-    klic_int = int.from_bytes(klicensee, byteorder='big')
     num_blocks = (byte_offset + size + 15) // 16
 
     file.seek(data_offset + block_offset * 16)
     encrypted = file.read(num_blocks * 16)
 
-    # Counter = klicensee + block_offset
-    nonce = ((klic_int + block_offset) % (1 << 128)).to_bytes(16, byteorder='big')
-    cipher = Cipher(algorithms.AES(key), modes.CTR(nonce), backend=default_backend())
-    decryptor = cipher.decryptor()
-    decrypted = decryptor.update(encrypted) + decryptor.finalize()
+    if pkg_type == PKG_RELEASE_TYPE_DEBUG:
+        decrypted = bytearray()
+        for i in range(num_blocks):
+            keystream = get_debug_keystream_block(qa_digest, block_offset + i)
+            chunk = encrypted[i * 16 : (i + 1) * 16]
+            decrypted.extend(a ^ b for a, b in zip(chunk, keystream))
+        return bytes(decrypted)[byte_offset : byte_offset + size]
+    else:
+        klic_int = int.from_bytes(klicensee, byteorder='big')
+        nonce = ((klic_int + block_offset) % (1 << 128)).to_bytes(16, byteorder='big')
+        cipher = Cipher(algorithms.AES(key), modes.CTR(nonce), backend=default_backend())
+        decryptor = cipher.decryptor()
+        decrypted = decryptor.update(encrypted) + decryptor.finalize()
+        
     return decrypted[byte_offset : byte_offset + size]
 
 class PKGViewerApp(DragDropCTk):
@@ -56,6 +83,8 @@ class PKGViewerApp(DragDropCTk):
         self.geometry("1000x820")
         self.current_pkg_path = None
         self.klicensee = None
+        self.qa_digest = None
+        self.pkg_type = None
         self.data_offset = 0
         self.file_entries = {}
         self.setup_ui()
@@ -153,7 +182,6 @@ class PKGViewerApp(DragDropCTk):
     def parse_sfo(self, data):
         if len(data) < 20 or data[:4] != b'\x00PSF':
             return {}
-
         try:
             # Header: magic, version, key_table_start, data_table_start, num_entries
             key_ptr, data_ptr, count = struct.unpack('<I I I', data[8:20])
@@ -210,6 +238,7 @@ class PKGViewerApp(DragDropCTk):
 
                 if header[0] != b'\x7FPKG': raise ValueError("Invalid PKG")
 
+                self.pkg_type = header[1]
                 pkg_platform = header[2]
                 meta_offset = header[3]
                 meta_count = header[4]
@@ -218,7 +247,7 @@ class PKGViewerApp(DragDropCTk):
                 self.data_offset = header[8]
                 content_id = header[10].decode('ascii', errors='ignore').strip('\x00')
                 self.current_folder_name = content_id
-                qa_digest = header[11]
+                self.qa_digest = header[11]
                 self.klicensee = header[12]
 
                 npdrm_version = "N/A"
@@ -227,25 +256,32 @@ class PKGViewerApp(DragDropCTk):
                     meta_id, meta_size = struct.unpack('>I I', f.read(8))
                     meta_data = f.read(meta_size)
                     if meta_id == 0x05 and meta_size >= 4:
-                        npdrm_hex = meta_data[:2].hex()
-                        ver_hex = meta_data[2:4].hex()
-                        npdrm_version = npdrm_hex
+                        npdrm_version = meta_data[:2].hex()
 
                 entry_size = 32
                 raw_table = None
                 used_key_name = ""
 
-                potential_keys = [(PKG_PS3_AES_KEY, "Retail"), (PKG_PS3_IDU_AES_KEY, "IDU")]
-                if pkg_platform == 2: potential_keys = [(PKG_PSP_AES_KEY, "PSP")]
-
-                for key, kname in potential_keys:
-                    candidate = decrypt_data_blocks(f, self.data_offset, 0, file_count * entry_size, key, self.klicensee)
+                if self.pkg_type == PKG_RELEASE_TYPE_DEBUG:
+                    candidate = decrypt_data_blocks(f, self.data_offset, 0, file_count * entry_size, None, self.klicensee, self.pkg_type, self.qa_digest)
                     if file_count > 0:
                         n_off, n_sz, _, _, _, _ = struct.unpack('>I I Q Q I I', candidate[:32])
-                        if n_sz < 256: 
+                        if n_sz < 256:
                             raw_table = candidate
-                            used_key_name = kname
-                            break
+                            used_key_name = "Debug"
+                else:
+                    potential_keys = [(PKG_PS3_AES_KEY, "PS3 Retail"), (PKG_PS3_IDU_AES_KEY, "PS3 IDU")]
+                    if pkg_platform == PKG_PLATFORM_TYPE_PSP_PSVITA: 
+                        potential_keys = [(PKG_PSP_AES_KEY, "PSP Retail"), (PKG_PSP_IDU_AES_KEY, "PSP IDU"), (PKG_PSP2_AES_KEY, "PS Vita Retail"), (PKG_PSP2_LIVEAREA_AES_KEY, "PS Vita Live Area")]
+
+                    for key, kname in potential_keys:
+                        candidate = decrypt_data_blocks(f, self.data_offset, 0, file_count * entry_size, key, self.klicensee, self.pkg_type, self.qa_digest)
+                        if file_count > 0:
+                            n_off, n_sz, _, _, _, _ = struct.unpack('>I I Q Q I I', candidate[:32])
+                            if n_sz < 256: 
+                                raw_table = candidate
+                                used_key_name = kname
+                                break
 
                 if not raw_table: raise ValueError("Failed to decrypt file table.")
 
@@ -257,11 +293,32 @@ class PKGViewerApp(DragDropCTk):
                     n_off, n_sz, f_off, f_sz, f_type, _ = struct.unpack('>I I Q Q I I', e_raw)
                     if n_sz == 0: continue
 
-                    is_psp = (f_type & PKG_FILE_ENTRY_PSP) != 0
-                    key = PKG_PSP_AES_KEY if is_psp else (PKG_PS3_AES_KEY if used_key_name == "Retail" else PKG_PS3_IDU_AES_KEY)
+                    key = None
+                    if self.pkg_type == PKG_RELEASE_TYPE_RELEASE:
+                        possible_keys = [
+                            (PKG_PSP_IDU_AES_KEY if used_key_name == "PSP IDU" else PKG_PSP_AES_KEY),
+                            (PKG_PS3_IDU_AES_KEY if used_key_name == "PS3 IDU" else PKG_PS3_AES_KEY),
+                            (PKG_PSP2_LIVEAREA_AES_KEY if used_key_name == "Live Area" else PKG_PSP2_AES_KEY)
+                        ]
 
-                    name_raw = decrypt_data_blocks(f, self.data_offset, n_off, n_sz, key, self.klicensee)
-                    full_path = name_raw.decode('utf-8', errors='ignore').strip('\x00').replace("\\", "/")
+                        for test_key in possible_keys:
+                            name_raw = decrypt_data_blocks(f, self.data_offset, n_off, n_sz, test_key, self.klicensee, self.pkg_type, self.qa_digest)
+                            try:
+                                decoded_name = name_raw.decode('utf-8').strip('\x00')
+                                if all(31 < ord(c) < 127 or c in "/._-" for c in decoded_name):
+                                    key = test_key
+                                    full_path = decoded_name.replace("\\", "/")
+                                    break
+                            except:
+                                continue
+
+                        if key is None:
+                            key = possible_keys[0]
+                            name_raw = decrypt_data_blocks(f, self.data_offset, n_off, n_sz, key, self.klicensee, self.pkg_type, self.qa_digest)
+                            full_path = name_raw.decode('utf-8', errors='ignore').strip('\x00').replace("\\", "/")
+                    else:
+                        name_raw = decrypt_data_blocks(f, self.data_offset, n_off, n_sz, None, self.klicensee, self.pkg_type, self.qa_digest)
+                        full_path = name_raw.decode('utf-8', errors='ignore').strip('\x00').replace("\\", "/")
 
                     parts = [p for p in full_path.split('/') if p]
                     parent = ""
@@ -286,10 +343,11 @@ class PKGViewerApp(DragDropCTk):
                 # PKG INFO
                 pkg_info = f"PKG INFO:\n{'-'*50}\n"
                 pkg_info += f"Content ID:    {content_id}\n"
-                pkg_info += f"Platform:      {'PS3' if pkg_platform == 1 else 'PSP'}\n"
+                pkg_info += f"Platform:      {'PS3' if pkg_platform == PKG_PLATFORM_TYPE_PS3 else 'PSP/Vita'}\n"
+                pkg_info += f"Release Type:  {'Debug' if self.pkg_type == PKG_RELEASE_TYPE_DEBUG else 'Retail'}\n"
                 pkg_info += f"Package Size:  {self.format_size(pkg_size)}\n"
                 pkg_info += f"NPDRM Version: {npdrm_version}\n"
-                pkg_info += f"QA Digest:     {qa_digest.hex().upper()}\n"
+                pkg_info += f"QA Digest:     {self.qa_digest.hex().upper()}\n"
                 pkg_info += f"Klicensee:     {self.klicensee.hex().upper()}\n"
                 pkg_info += f"Key Type:      {used_key_name}\n"
                 pkg_info += f"File Count:    {file_count}\n\n"
@@ -297,7 +355,7 @@ class PKGViewerApp(DragDropCTk):
                 # SFO INFO
                 sfo_info = f"SFO INFO:\n{'-'*50}\n"
                 if sfo_entry:
-                    sfo_data_raw = decrypt_data_blocks(f, self.data_offset, sfo_entry['off'], sfo_entry['sz'], sfo_entry['key'], self.klicensee)
+                    sfo_data_raw = decrypt_data_blocks(f, self.data_offset, sfo_entry['off'], sfo_entry['sz'], sfo_entry['key'], self.klicensee, self.pkg_type, self.qa_digest)
                     sfo_meta = self.parse_sfo(sfo_data_raw)
 
                     title = sfo_meta.get("TITLE", "N/A")
@@ -351,10 +409,21 @@ class PKGViewerApp(DragDropCTk):
 
                 pkg_f.seek(self.data_offset + block_off * 16)
                 enc = pkg_f.read(num_blocks * 16)
-                nonce = ((klic_int + block_off) % (1 << 128)).to_bytes(16, 'big')
 
-                cipher = Cipher(algorithms.AES(entry['key']), modes.CTR(nonce), backend=default_backend())
-                dec = cipher.decryptor().update(enc)
+                if self.pkg_type == PKG_RELEASE_TYPE_DEBUG:
+                    dec = bytearray()
+                    for i in range(num_blocks):
+                        keystream = get_debug_keystream_block(self.qa_digest, block_off + i)
+                        c_chunk = enc[i * 16 : (i + 1) * 16]
+                        dec.extend(a ^ b for a, b in zip(c_chunk, keystream))
+                    dec = bytes(dec)
+                elif self.pkg_type == PKG_RELEASE_TYPE_RELEASE:
+                    nonce = ((klic_int + block_off) % (1 << 128)).to_bytes(16, 'big')
+                    cipher = Cipher(algorithms.AES(entry['key']), modes.CTR(nonce), backend=default_backend())
+                    dec = cipher.decryptor().update(enc)
+                else:
+                    dec = enc
+
                 out_f.write(dec[byte_off : byte_off + to_read])
 
                 remaining -= to_read
