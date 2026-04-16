@@ -1,10 +1,27 @@
+#!/usr/bin/env python3
 import os
+import sys
 import struct
 import threading
 import customtkinter as ctk
 from tkinter import ttk, filedialog, messagebox
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
+
+try:
+    from tkinterdnd2 import TkinterDnD, DND_FILES
+    HAS_DND = True
+except ImportError:
+    HAS_DND = False
+
+if HAS_DND:
+    class DragDropCTk(ctk.CTk, TkinterDnD.DnDWrapper):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.TkdndVersion = TkinterDnD._require(self)
+else:
+    class DragDropCTk(ctk.CTk):
+        pass
 
 PKG_PS3_AES_KEY = bytes.fromhex("2E7B71D7C9C9A14EA3221F188828B8F8")
 PKG_PS3_IDU_AES_KEY = bytes.fromhex("5DB911E6B7E50A7D321538FD7C66F17B")
@@ -32,8 +49,8 @@ def decrypt_data_blocks(file, data_offset, relative_offset, size, key, klicensee
     decrypted = decryptor.update(encrypted) + decryptor.finalize()
     return decrypted[byte_offset : byte_offset + size]
 
-class PKGViewerApp(ctk.CTk):
-    def __init__(self):
+class PKGViewerApp(DragDropCTk):
+    def __init__(self, initial_filepath=None):
         super().__init__()
         self.title("PKG Viewer")
         self.geometry("1000x820")
@@ -43,6 +60,26 @@ class PKGViewerApp(ctk.CTk):
         self.file_entries = {}
         self.setup_ui()
         self.current_folder_name = "Extracted_PKG"
+
+        if HAS_DND:
+            self.drop_target_register(DND_FILES)
+            self.dnd_bind('<<Drop>>', self.handle_drop)
+
+        if initial_filepath and os.path.exists(initial_filepath):
+            self.current_pkg_path = initial_filepath
+            self.lbl_filepath.configure(text=os.path.basename(self.current_pkg_path), text_color="white")
+            self.after(100, self.load_pkg)
+
+    def handle_drop(self, event):
+        files = self.tk.splitlist(event.data)
+        if files:
+            filepath = files[0]
+            if filepath.lower().endswith('.pkg'):
+                self.current_pkg_path = filepath
+                self.lbl_filepath.configure(text=os.path.basename(filepath), text_color="white")
+                self.load_pkg()
+            else:
+                messagebox.showerror("Error", "Please drop a valid .pkg file.")
 
     def setup_ui(self):
         self.top_frame = ctk.CTkFrame(self)
@@ -399,5 +436,6 @@ class PKGViewerApp(ctk.CTk):
         threading.Thread(target=self.extraction_worker, args=(None, dest, "all"), daemon=True).start()
 
 if __name__ == "__main__":
-    app = PKGViewerApp()
+    initial_pkg = sys.argv[1] if len(sys.argv) > 1 else None
+    app = PKGViewerApp(initial_filepath=initial_pkg)
     app.mainloop()
