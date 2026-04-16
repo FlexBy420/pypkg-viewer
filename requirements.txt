@@ -1,3 +1,4 @@
 customtkinter
 cryptography
 tkinterdnd2
+pyinstaller
