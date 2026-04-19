@@ -636,9 +636,10 @@ class PKGViewerApp(DragDropCTk):
                         messagebox.showerror("Error", "Failed converting AT3 audio.")
 
                 elif ext == 'pam':
-                    env = os.environ.copy()
-                    cmd = ['ffplay', '-autoexit', '-window_title', filename, '-loop', '0', temp_path]
-                    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+                    try:
+                        env = os.environ.copy()
+                        cmd = ['ffplay', '-autoexit', '-window_title', filename, '-loop', '0', temp_path]
+                        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
                     except FileNotFoundError:
                         msg = ("To play PAM files correctly, please ensure that FFmpeg is installed.")
                         messagebox.showwarning("Missing FFmpeg", msg)
