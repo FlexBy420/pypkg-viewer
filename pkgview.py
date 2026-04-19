@@ -637,12 +637,26 @@ class PKGViewerApp(DragDropCTk):
 
                 elif ext == 'pam':
                     try:
-                        env = os.environ.copy()
-                        cmd = ['ffplay', '-autoexit', '-window_title', filename, '-loop', '0', temp_path]
-                        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
-                    except FileNotFoundError:
-                        msg = ("To play PAM files correctly, please ensure that FFmpeg is installed.")
-                        messagebox.showwarning("Missing FFmpeg", msg)
+                        filename = os.path.basename(entry['path'])
+                        ffplay_path = subprocess.run(
+                            ['which', 'ffplay'] if os.name != 'nt' else ['where', 'ffplay'], capture_output=True, text=True).stdout.strip()
+                        if not ffplay_path:
+                            try:
+                                ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+                                potential_ffplay = ffmpeg_exe.replace('ffmpeg', 'ffplay').replace('FFMPEG', 'FFPLAY')
+                                if os.path.exists(potential_ffplay):
+                                    ffplay_path = potential_ffplay
+                            except:
+                                pass
+
+                        if ffplay_path:
+                            cmd = [ffplay_path, '-autoexit', '-window_title', filename, '-loop', '0', temp_path]
+                            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        else:
+                            messagebox.showwarning("Missing FFmpeg/ffplay", msg)
+
+                    except Exception as e:
+                        messagebox.showerror("Error", f"Failed to play video: {e}")
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open the file:\n{str(e)}")
