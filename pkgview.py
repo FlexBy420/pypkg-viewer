@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
+import io
 import os
 import sys
 import struct
 import threading
 import hashlib
 import customtkinter as ctk
+import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
+from PIL import Image
 
 try:
     from tkinterdnd2 import TkinterDnD, DND_FILES
@@ -166,6 +169,19 @@ class PKGViewerApp(DragDropCTk):
         self.btn_extract_sel.pack(side="right", padx=10, pady=5)
         self.btn_extract_all = ctk.CTkButton(action_frame, text="Extract All", command=self.extract_all, state="disabled")
         self.btn_extract_all.pack(side="right", padx=5, pady=5)
+
+        self.context_menu = tk.Menu(self, tearoff=0, bg="#2b2b2b", fg="white", activebackground="#1f538d")
+        self.context_menu.add_command(label="Preview Image", command=self.preview_selected_image)
+        
+        self.tree.bind("<Button-3>", self.show_context_menu)
+
+    def show_context_menu(self, event):
+        item = self.tree.identify_row(event.y)
+        if item:
+            self.tree.selection_set(item)
+            entry = self.file_entries.get(item)
+            if entry and entry['path'].lower().endswith(('.png', '.jpg', '.jpeg')):
+                self.context_menu.tk_popup(event.x_root, event.y_root)
 
     def setup_info_tab(self):
         self.info_text = ctk.CTkTextbox(self.tab_info, font=("Consolas", 14), wrap="none")
@@ -424,6 +440,76 @@ class PKGViewerApp(DragDropCTk):
                 curr_off += to_read
                 if current_progress_callback:
                     current_progress_callback(to_read)
+
+    def extract_file_to_memory(self, pkg_f, entry):
+        klic_int = int.from_bytes(self.klicensee, byteorder='big')
+        remaining = entry['sz']
+        curr_off = entry['off']
+        
+        extracted_data = bytearray()
+        
+        while remaining > 0:
+            to_read = min(remaining, 1024 * 1024)
+            block_off = curr_off // 16
+            byte_off = curr_off % 16
+            num_blocks = (byte_off + to_read + 15) // 16
+
+            pkg_f.seek(self.data_offset + block_off * 16)
+            enc = pkg_f.read(num_blocks * 16)
+
+            if self.pkg_type == PKG_RELEASE_TYPE_DEBUG:
+                dec = bytearray()
+                for i in range(num_blocks):
+                    keystream = get_debug_keystream_block(self.qa_digest, block_off + i)
+                    c_chunk = enc[i * 16 : (i + 1) * 16]
+                    dec.extend(a ^ b for a, b in zip(c_chunk, keystream))
+                dec = bytes(dec)
+            elif self.pkg_type == PKG_RELEASE_TYPE_RELEASE:
+                nonce = ((klic_int + block_off) % (1 << 128)).to_bytes(16, 'big')
+                cipher = Cipher(algorithms.AES(entry['key']), modes.CTR(nonce), backend=default_backend())
+                dec = cipher.decryptor().update(enc)
+            else:
+                dec = enc
+
+            extracted_data.extend(dec[byte_off : byte_off + to_read])
+            remaining -= to_read
+            curr_off += to_read
+            
+        return bytes(extracted_data)
+
+    def preview_selected_image(self):
+        selection = self.tree.selection()
+        if not selection: return
+        
+        item = selection[0]
+        entry = self.file_entries.get(item)
+        if not entry: return
+        
+        try:
+            with open(self.current_pkg_path, 'rb') as f:
+                img_data = self.extract_file_to_memory(f, entry)
+
+            image = Image.open(io.BytesIO(img_data))
+            preview_win = ctk.CTkToplevel(self)
+            filename = os.path.basename(entry['path'])
+            preview_win.title(f"Preview: {filename}")
+
+            max_size = 900
+            width, height = image.size
+            if width > max_size or height > max_size:
+                ratio = min(max_size / width, max_size / height)
+                width = int(width * ratio)
+                height = int(height * ratio)
+                
+            preview_win.geometry(f"{width + 40}x{height + 40}")
+            preview_win.focus()
+
+            ctk_img = ctk.CTkImage(light_image=image, dark_image=image, size=(width, height))
+            lbl = ctk.CTkLabel(preview_win, image=ctk_img, text="")
+            lbl.pack(expand=True, fill="both", padx=10, pady=10)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open image:\n{str(e)}")
 
     def update_progress(self, bytes_done, total_bytes):
         percent = (bytes_done / total_bytes)
