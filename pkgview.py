@@ -715,6 +715,7 @@ class PKGViewerApp(DragDropCTk):
         threading.Thread(target=self.extraction_worker, args=(None, dest, "all"), daemon=True).start()
 
 if __name__ == "__main__":
+    ctk.set_appearance_mode("dark")
     initial_pkg = sys.argv[1] if len(sys.argv) > 1 else None
     app = PKGViewerApp(initial_filepath=initial_pkg)
     app.mainloop()
