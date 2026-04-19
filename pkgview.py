@@ -13,6 +13,11 @@ from cryptography.hazmat.backends import default_backend
 from PIL import Image
 
 try:
+    import PIL._tkinter_finder
+except ImportError:
+    pass
+
+try:
     from tkinterdnd2 import TkinterDnD, DND_FILES
     HAS_DND = True
 except ImportError:
