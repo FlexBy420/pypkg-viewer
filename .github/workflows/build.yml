@@ -69,6 +69,8 @@ jobs:
       - name: Install Requirements (Linux)
         if: ${{ matrix.os == 'ubuntu-latest' }}
         run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk tk-dev libx11-dev libasound2-dev
           pip install -r requirements.txt
 
       - name: Build Executable (MacOS x64)

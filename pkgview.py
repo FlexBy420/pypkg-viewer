@@ -55,6 +55,11 @@ PKG_RELEASE_TYPE_RELEASE = 0x8000
 PKG_PLATFORM_TYPE_PS3 = 0x0001
 PKG_PLATFORM_TYPE_PSP_PSVITA = 0x0002
 
+def get_resource_path(relative_path):
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
 def get_debug_keystream_block(qa_digest, block_index):
     qa_0 = qa_digest[0:8]
     qa_1 = qa_digest[8:16]
@@ -631,9 +636,9 @@ class PKGViewerApp(DragDropCTk):
                         messagebox.showerror("Error", "Failed converting AT3 audio.")
 
                 elif ext == 'pam':
+                    env = os.environ.copy()
                     cmd = ['ffplay', '-autoexit', '-window_title', filename, '-loop', '0', temp_path]
-                    try:
-                        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
                     except FileNotFoundError:
                         msg = ("To play PAM files correctly, please ensure that FFmpeg is installed.")
                         messagebox.showwarning("Missing FFmpeg", msg)
