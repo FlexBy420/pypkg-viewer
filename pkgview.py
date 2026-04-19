@@ -641,6 +641,7 @@ class PKGViewerApp(DragDropCTk):
                         ffplay_path = subprocess.run(
                             ['which', 'ffplay'] if os.name != 'nt' else ['where', 'ffplay'], capture_output=True, text=True).stdout.strip()
                         print("ffplay_path:", ffplay_path)
+                        print("DISPLAY:", os.environ.get("DISPLAY"))
                         if not ffplay_path:
                             try:
                                 ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
@@ -652,7 +653,7 @@ class PKGViewerApp(DragDropCTk):
 
                         if ffplay_path:
                             cmd = [ffplay_path, '-autoexit', '-window_title', filename, '-loop', '0', temp_path]
-                            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            subprocess.Popen(cmd, stdout=None, stderr=None)
                         else:
                             messagebox.showwarning("Missing FFmpeg/ffplay", msg)
 
