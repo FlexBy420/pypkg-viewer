@@ -10,7 +10,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
-from PIL import Image
+from PIL import Image, DdsImagePlugin
 
 try:
     import PIL._tkinter_finder
@@ -185,7 +185,7 @@ class PKGViewerApp(DragDropCTk):
         if item:
             self.tree.selection_set(item)
             entry = self.file_entries.get(item)
-            if entry and entry['path'].lower().endswith(('.png', '.jpg', '.jpeg')):
+            if entry and entry['path'].lower().endswith(('.png', '.jpg', '.jpeg', '.dds')):
                 self.context_menu.tk_popup(event.x_root, event.y_root)
 
     def setup_info_tab(self):
