@@ -640,6 +640,7 @@ class PKGViewerApp(DragDropCTk):
                         filename = os.path.basename(entry['path'])
                         ffplay_path = subprocess.run(
                             ['which', 'ffplay'] if os.name != 'nt' else ['where', 'ffplay'], capture_output=True, text=True).stdout.strip()
+                        print("ffplay_path:", ffplay_path)
                         if not ffplay_path:
                             try:
                                 ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
