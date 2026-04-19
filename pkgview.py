@@ -5,6 +5,8 @@ import sys
 import struct
 import threading
 import hashlib
+import tempfile
+import subprocess
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -176,7 +178,7 @@ class PKGViewerApp(DragDropCTk):
         self.btn_extract_all.pack(side="right", padx=5, pady=5)
 
         self.context_menu = tk.Menu(self, tearoff=0, bg="#2b2b2b", fg="white", activebackground="#1f538d")
-        self.context_menu.add_command(label="Preview Image", command=self.preview_selected_image)
+        self.context_menu.add_command(label="Preview File", command=self.preview_selected_file)
         
         self.tree.bind("<Button-3>", self.show_context_menu)
 
@@ -185,7 +187,7 @@ class PKGViewerApp(DragDropCTk):
         if item:
             self.tree.selection_set(item)
             entry = self.file_entries.get(item)
-            if entry and entry['path'].lower().endswith(('.png', '.jpg', '.jpeg', '.dds')):
+            if entry and entry['path'].lower().endswith(('.png', '.jpg', '.jpeg', '.dds', '.pam', '.at3')):
                 self.context_menu.tk_popup(event.x_root, event.y_root)
 
     def setup_info_tab(self):
@@ -450,9 +452,9 @@ class PKGViewerApp(DragDropCTk):
         klic_int = int.from_bytes(self.klicensee, byteorder='big')
         remaining = entry['sz']
         curr_off = entry['off']
-        
+
         extracted_data = bytearray()
-        
+
         while remaining > 0:
             to_read = min(remaining, 1024 * 1024)
             block_off = curr_off // 16
@@ -479,42 +481,75 @@ class PKGViewerApp(DragDropCTk):
             extracted_data.extend(dec[byte_off : byte_off + to_read])
             remaining -= to_read
             curr_off += to_read
-            
+
         return bytes(extracted_data)
 
-    def preview_selected_image(self):
+    def preview_selected_file(self):
         selection = self.tree.selection()
         if not selection: return
-        
+
         item = selection[0]
         entry = self.file_entries.get(item)
         if not entry: return
-        
+
+        ext = entry['path'].lower().split('.')[-1]
+
         try:
             with open(self.current_pkg_path, 'rb') as f:
-                img_data = self.extract_file_to_memory(f, entry)
+                file_data = self.extract_file_to_memory(f, entry)
 
-            image = Image.open(io.BytesIO(img_data))
-            preview_win = ctk.CTkToplevel(self)
-            filename = os.path.basename(entry['path'])
-            preview_win.title(f"Preview: {filename}")
+            if ext in ['png', 'jpg', 'jpeg', 'dds']:
+                image = Image.open(io.BytesIO(file_data))
+                preview_win = ctk.CTkToplevel(self)
+                filename = os.path.basename(entry['path'])
+                preview_win.title(f"Preview: {filename}")
 
-            max_size = 900
-            width, height = image.size
-            if width > max_size or height > max_size:
-                ratio = min(max_size / width, max_size / height)
-                width = int(width * ratio)
-                height = int(height * ratio)
+                max_size = 900
+                width, height = image.size
+                if width > max_size or height > max_size:
+                    ratio = min(max_size / width, max_size / height)
+                    width = int(width * ratio)
+                    height = int(height * ratio)
+
+                preview_win.geometry(f"{width + 40}x{height + 40}")
+                preview_win.focus()
+
+                ctk_img = ctk.CTkImage(light_image=image, dark_image=image, size=(width, height))
+                lbl = ctk.CTkLabel(preview_win, image=ctk_img, text="")
+                lbl.pack(expand=True, fill="both", padx=10, pady=10)
+
+            elif ext in ['pam', 'at3']:
+                temp_dir = tempfile.gettempdir()
+                filename = os.path.basename(entry['path'])
+                base_temp_path = os.path.join(temp_dir, f"temp_preview_{filename}")
+
+                if ext == 'pam' and file_data.startswith(b'PAMF'):
+                    mpeg_start = file_data.find(b'\x00\x00\x01\xBA')
+                    if mpeg_start != -1:
+                        file_data = file_data[mpeg_start:]
+                    temp_path = base_temp_path + ".mpg"
+                else:
+                    temp_path = base_temp_path + f".{ext}"
+
+                with open(temp_path, 'wb') as tf:
+                    tf.write(file_data)
+                cmd = ['ffplay', '-autoexit', '-window_title', filename]
                 
-            preview_win.geometry(f"{width + 40}x{height + 40}")
-            preview_win.focus()
+                if ext == 'at3':
+                    cmd.extend(['-x', '350', '-y', '150', '-loop', '0'])
+                elif ext == 'pam':
+                    cmd.extend(['-loop', '0'])
+ 
+                cmd.append(temp_path)
 
-            ctk_img = ctk.CTkImage(light_image=image, dark_image=image, size=(width, height))
-            lbl = ctk.CTkLabel(preview_win, image=ctk_img, text="")
-            lbl.pack(expand=True, fill="both", padx=10, pady=10)
-            
+                try:
+                    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except FileNotFoundError:
+                    msg = ("To play PAM and AT3 files correctly, please ensure that FFmpeg is installed.")
+                    messagebox.showwarning("Missing FFmpeg", msg)
+         
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to open image:\n{str(e)}")
+            messagebox.showerror("Error", f"Failed to open the file:\n{str(e)}")
 
     def update_progress(self, bytes_done, total_bytes):
         percent = (bytes_done / total_bytes)
