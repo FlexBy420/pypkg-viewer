@@ -55,10 +55,27 @@ PKG_RELEASE_TYPE_RELEASE = 0x8000
 PKG_PLATFORM_TYPE_PS3 = 0x0001
 PKG_PLATFORM_TYPE_PSP_PSVITA = 0x0002
 
-def get_resource_path(relative_path):
+def get_ffplay_path():
     if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(os.path.abspath("."), relative_path)
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+
+    ext = ".exe" if os.name == 'nt' else ""
+    possible_paths = [
+        os.path.join(base_dir, "ffmpeg", f"ffplay{ext}"),
+        os.path.join(base_dir, f"ffplay{ext}"), 
+    ]
+
+    for p in possible_paths:
+        if os.path.exists(p):
+            if os.name != 'nt':
+                try: os.chmod(p, 0o755)
+                except: pass
+            return p
+
+    import shutil
+    return shutil.which("ffplay")
 
 def get_debug_keystream_block(qa_digest, block_index):
     qa_0 = qa_digest[0:8]
@@ -658,7 +675,7 @@ class PKGViewerApp(DragDropCTk):
                             cmd = [ffplay_path, '-autoexit', '-window_title', filename, '-loop', '0', temp_path]
                             subprocess.Popen(cmd, stdout=None, stderr=None, env=env)
                         else:
-                            messagebox.showwarning("Missing FFmpeg/ffplay", msg)
+                            messagebox.showwarning("Missing FFmpeg/ffplay")
 
                     except Exception as e:
                         messagebox.showerror("Error", f"Failed to play video: {e}")

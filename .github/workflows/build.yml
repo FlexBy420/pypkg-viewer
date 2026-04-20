@@ -74,6 +74,9 @@ jobs:
       - name: Build Executable (MacOS x64)
         if: ${{ matrix.os == 'macos-15-intel' }}
         run: |
+          mkdir -p macos_bundle/ffmpeg
+          curl -L -o ffplay.zip https://evermeet.cx/ffmpeg/getrelease/ffplay/zip
+          unzip ffplay.zip -d macos_bundle/ffmpeg/
           pyinstaller pkgview.py -w --noconfirm --onefile
           mkdir macos
           cp dist/pkgview macos
@@ -82,6 +85,9 @@ jobs:
       - name: Build Executable (MacOS ARM)
         if: ${{ matrix.os == 'macos-latest' }}
         run: |
+          mkdir -p macos_bundle/ffmpeg
+          curl -L -o ffplay.zip https://evermeet.cx/ffmpeg/getrelease/ffplay/zip
+          unzip ffplay.zip -d macos_bundle/ffmpeg/
           pyinstaller pkgview.py -w --noconfirm --onefile
           mkdir macos-arm
           cp dist/pkgview macos-arm
@@ -90,17 +96,26 @@ jobs:
       - name: Build Executable (Windows)
         if: ${{ matrix.os == 'windows-latest' }}
         run: |
+          curl -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+          Expand-Archive ffmpeg.zip -DestinationPath temp_ffmpeg
+          mkdir windows/ffmpeg
+          Get-ChildItem -Path "temp_ffmpeg/*/bin/ffplay.exe" | Copy-Item -Destination "windows/ffmpeg/"
+
           pyinstaller pkgview.py --noconfirm --noconsole
-          mkdir windows
-          cp -r dist/pkgview/* windows/
+          cp dist/pkgview.exe windows/
+          
           Compress-Archive -Path "windows/*" -DestinationPath pkgview_Windows.zip
 
       - name: Build Executable (Linux)
         if: ${{ matrix.os == 'ubuntu-latest' }}
         run: |
+          curl -L -o ffmpeg.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+          mkdir -p linux/ffmpeg
+          tar -xJf ffmpeg.tar.xz -C linux/ffmpeg --strip-components=1
+          find linux/ffmpeg -type f ! -name 'ffplay' -delete
+          
           pyinstaller pkgview.py -w --noconfirm --onefile
-          mkdir linux
-          cp dist/pkgview linux
+          cp dist/pkgview linux/
           (cd linux/ && zip -r -X ../pkgview_Linux.zip .)
 
       - name: Upload Artifact (MacOS x64)
