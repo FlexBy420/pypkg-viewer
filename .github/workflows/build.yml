@@ -74,9 +74,6 @@ jobs:
       - name: Build Executable (MacOS x64)
         if: ${{ matrix.os == 'macos-15-intel' }}
         run: |
-          mkdir -p macos_bundle/ffmpeg
-          curl -L -o ffplay.zip https://evermeet.cx/ffmpeg/getrelease/ffplay/zip
-          unzip ffplay.zip -d macos_bundle/ffmpeg/
           pyinstaller pkgview.py -w --noconfirm --onefile
           mkdir macos
           cp dist/pkgview macos
@@ -85,9 +82,6 @@ jobs:
       - name: Build Executable (MacOS ARM)
         if: ${{ matrix.os == 'macos-latest' }}
         run: |
-          mkdir -p macos_bundle/ffmpeg
-          curl -L -o ffplay.zip https://evermeet.cx/ffmpeg/getrelease/ffplay/zip
-          unzip ffplay.zip -d macos_bundle/ffmpeg/
           pyinstaller pkgview.py -w --noconfirm --onefile
           mkdir macos-arm
           cp dist/pkgview macos-arm
@@ -106,14 +100,9 @@ jobs:
       - name: Build Executable (Linux)
         if: ${{ matrix.os == 'ubuntu-latest' }}
         run: |
-          curl -L -o ffmpeg.tar.xz https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl-shared.tar.xz
-          mkdir temp_ffmpeg
-          tar -xJf ffmpeg.tar.xz -C temp_ffmpeg --strip-components=1
-          mkdir -p linux/ffmpeg
-          cp temp_ffmpeg/bin/ffplay linux/ffmpeg/
-          cp -r temp_ffmpeg/lib/*.so* linux/ffmpeg/
           pyinstaller pkgview.py -w --noconfirm --onefile
-          cp dist/pkgview linux/
+          mkdir linux
+          cp dist/pkgview linux
           (cd linux/ && zip -r -X ../pkgview_Linux.zip .)
 
       - name: Upload Artifact (MacOS x64)
