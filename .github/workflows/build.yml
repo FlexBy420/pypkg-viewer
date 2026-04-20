@@ -98,13 +98,10 @@ jobs:
         run: |
           curl -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
           Expand-Archive ffmpeg.zip -DestinationPath temp_ffmpeg
-          mkdir windows/ffmpeg
-          Get-ChildItem -Path "temp_ffmpeg/*/bin/ffplay.exe" | Copy-Item -Destination "windows/ffmpeg/"
-
-          pyinstaller pkgview.py --noconfirm --noconsole
-          cp dist/pkgview.exe windows/
-          
-          Compress-Archive -Path "windows/*" -DestinationPath pkgview_Windows.zip
+          pyinstaller pkgview.py --noconfirm --noconsole --onedir
+          mkdir dist/pkgview/ffmpeg
+          Get-ChildItem -Path "temp_ffmpeg/*/bin/ffplay.exe" | Copy-Item -Destination "dist/pkgview/ffmpeg/"
+          Compress-Archive -Path "dist/pkgview/*" -DestinationPath pkgview_Windows.zip
 
       - name: Build Executable (Linux)
         if: ${{ matrix.os == 'ubuntu-latest' }}
