@@ -671,7 +671,7 @@ class PKGViewerApp(DragDropCTk):
                             if "LD_LIBRARY_PATH" in env: 
                                 del env["LD_LIBRARY_PATH"]
                             cmd = [ffplay_path, '-autoexit', '-window_title', filename, '-loop', '0', temp_path]
-                            subprocess.Popen(cmd, stdout=None, stderr=None, env=env)
+                            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
                         else:
                             messagebox.showwarning("Missing FFmpeg/ffplay")
 
