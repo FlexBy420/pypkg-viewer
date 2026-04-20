@@ -3,3 +3,5 @@ cryptography
 tkinterdnd2
 pyinstaller
 pillow
+pygame
+imageio-ffmpeg

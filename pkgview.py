@@ -2,6 +2,7 @@
 import io
 import os
 import sys
+import time
 import struct
 import threading
 import hashlib
@@ -13,6 +14,9 @@ from tkinter import ttk, filedialog, messagebox
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 from PIL import Image, DdsImagePlugin
+
+import pygame
+import imageio_ffmpeg
 
 try:
     import PIL._tkinter_finder
@@ -34,6 +38,8 @@ else:
     class DragDropCTk(ctk.CTk):
         pass
 
+pygame.mixer.init()
+
 PKG_PS3_AES_KEY = bytes.fromhex("2E7B71D7C9C9A14EA3221F188828B8F8")
 PKG_PS3_IDU_AES_KEY = bytes.fromhex("5DB911E6B7E50A7D321538FD7C66F17B")
 PKG_PSP_AES_KEY = bytes.fromhex("07F2C68290B50D2C33818D709B60E62B")
@@ -49,6 +55,28 @@ PKG_RELEASE_TYPE_RELEASE = 0x8000
 PKG_PLATFORM_TYPE_PS3 = 0x0001
 PKG_PLATFORM_TYPE_PSP_PSVITA = 0x0002
 
+def get_ffplay_path():
+    if hasattr(sys, '_MEIPASS'):
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+
+    ext = ".exe" if os.name == 'nt' else ""
+    possible_paths = [
+        os.path.join(base_dir, "ffmpeg", f"ffplay{ext}"),
+        os.path.join(base_dir, f"ffplay{ext}"), 
+    ]
+
+    for p in possible_paths:
+        if os.path.exists(p):
+            if os.name != 'nt':
+                try: os.chmod(p, 0o755)
+                except: pass
+            return p
+
+    import shutil
+    return shutil.which("ffplay")
+
 def get_debug_keystream_block(qa_digest, block_index):
     qa_0 = qa_digest[0:8]
     qa_1 = qa_digest[8:16]
@@ -58,7 +86,6 @@ def get_debug_keystream_block(qa_digest, block_index):
     buffer[16:24] = qa_1 # input[2]
     buffer[24:32] = qa_1 # input[3]
     buffer[56:64] = struct.pack(">Q", block_index)
-
     return hashlib.sha1(buffer).digest()[:16]
 
 def decrypt_data_blocks(file, data_offset, relative_offset, size, key, klicensee, pkg_type, qa_digest):
@@ -85,6 +112,89 @@ def decrypt_data_blocks(file, data_offset, relative_offset, size, key, klicensee
         decrypted = decryptor.update(encrypted) + decryptor.finalize()
         
     return decrypted[byte_offset : byte_offset + size]
+
+class AudioPlayerWindow(ctk.CTkToplevel):
+    def __init__(self, master, wav_path, title_name):
+        super().__init__(master)
+        self.title(f"Audio Player: {title_name}")
+        self.geometry("400x140")
+        self.resizable(False, False)
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+        
+        self.wav_path = wav_path
+        pygame.mixer.music.load(self.wav_path)
+        sound = pygame.mixer.Sound(self.wav_path)
+        self.length = sound.get_length()
+        
+        self.is_playing = True
+        self.start_time = time.time()
+        self.offset = 0.0
+
+        # UI
+        self.btn_play_pause = ctk.CTkButton(self, text="⏸ Pause", width=100, command=self.toggle_play)
+        self.btn_play_pause.pack(pady=(15, 5))
+
+        self.slider = ctk.CTkSlider(self, from_=0, to=self.length, command=self.seek)
+        self.slider.set(0)
+        self.slider.pack(fill="x", padx=20, pady=5)
+
+        self.lbl_time = ctk.CTkLabel(self, text=f"00:00 / {self.format_time(self.length)}")
+        self.lbl_time.pack()
+
+        pygame.mixer.music.play()
+        self.update_loop()
+
+    def format_time(self, seconds):
+        m = int(seconds // 60)
+        s = int(seconds % 60)
+        return f"{m:02d}:{s:02d}"
+
+    def toggle_play(self):
+        if self.is_playing:
+            pygame.mixer.music.pause()
+            self.btn_play_pause.configure(text="▶ Play")
+            self.offset += time.time() - self.start_time
+        else:
+            if not pygame.mixer.music.get_busy():
+                pygame.mixer.music.play(loops=0, start=self.offset)
+            else:
+                pygame.mixer.music.unpause()
+                
+            self.btn_play_pause.configure(text="⏸ Pause")
+            self.start_time = time.time()
+            
+        self.is_playing = not self.is_playing
+
+    def seek(self, value):
+        value = float(value)
+        self.offset = value
+        self.start_time = time.time()
+        pygame.mixer.music.play(loops=0, start=self.offset)
+        if not self.is_playing:
+            pygame.mixer.music.pause()
+
+    def update_loop(self):
+        if not self.winfo_exists(): return
+        if self.is_playing:
+            current = self.offset + (time.time() - self.start_time)
+
+            if current >= self.length:
+                self.is_playing = False
+                self.btn_play_pause.configure(text="▶ Play")
+                self.slider.set(0)
+                self.offset = 0
+                pygame.mixer.music.stop()
+                self.lbl_time.configure(text=f"00:00 / {self.format_time(self.length)}")
+            else:
+                self.slider.set(current)
+                self.lbl_time.configure(text=f"{self.format_time(current)} / {self.format_time(self.length)}")
+                
+        self.after(100, self.update_loop)
+
+    def on_close(self):
+        pygame.mixer.music.stop()
+        pygame.mixer.music.unload()
+        self.destroy()
 
 class PKGViewerApp(DragDropCTk):
     def __init__(self, initial_filepath=None):
@@ -233,14 +343,10 @@ class PKGViewerApp(DragDropCTk):
             return {}
 
     def format_size(self, size):
-        if size >= 1073741824:
-            return f"{size} ({size / 1073741824:.2f} GB)"
-        elif size >= 1048576:
-            return f"{size} ({size / 1048576:.2f} MB)"
-        elif size >= 1024:
-            return f"{size} ({size / 1024:.2f} KB)"
-        else:
-            return f"{size} ({size} B)"
+        if size >= 1073741824: return f"{size} ({size / 1073741824:.2f} GB)"
+        elif size >= 1048576: return f"{size} ({size / 1048576:.2f} MB)"
+        elif size >= 1024: return f"{size} ({size / 1024:.2f} KB)"
+        else: return f"{size} ({size} B)"
 
     def open_file(self):
         path = filedialog.askopenfilename(filetypes=[("PKG", ("*.pkg", "*.PKG"))])
@@ -400,9 +506,7 @@ class PKGViewerApp(DragDropCTk):
                     self.title(f"PKG Viewer - {title}")
                 else:
                     sfo_info += "PARAM.SFO not found or corrupted.\n"
-
                 self.info_text.insert("end", pkg_info + sfo_info)
-
             self.btn_extract_all.configure(state="normal")
             self.btn_extract_sel.configure(state="normal")
 
@@ -452,7 +556,6 @@ class PKGViewerApp(DragDropCTk):
         klic_int = int.from_bytes(self.klicensee, byteorder='big')
         remaining = entry['sz']
         curr_off = entry['off']
-
         extracted_data = bytearray()
 
         while remaining > 0:
@@ -533,21 +636,48 @@ class PKGViewerApp(DragDropCTk):
 
                 with open(temp_path, 'wb') as tf:
                     tf.write(file_data)
-                cmd = ['ffplay', '-autoexit', '-window_title', filename]
-                
-                if ext == 'at3':
-                    cmd.extend(['-x', '350', '-y', '150', '-loop', '0'])
-                elif ext == 'pam':
-                    cmd.extend(['-loop', '0'])
- 
-                cmd.append(temp_path)
 
-                try:
-                    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                except FileNotFoundError:
-                    msg = ("To play PAM and AT3 files correctly, please ensure that FFmpeg is installed.")
-                    messagebox.showwarning("Missing FFmpeg", msg)
-         
+                if ext in ['at3']:
+                    wav_path = base_temp_path + ".wav"
+                    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+                    subprocess.run(
+                        [ffmpeg_exe, '-y', '-i', temp_path, wav_path],
+                        stdout=subprocess.DEVNULL, 
+                        stderr=subprocess.DEVNULL
+                    )
+                    
+                    if os.path.exists(wav_path):
+                        AudioPlayerWindow(self, wav_path, filename)
+                    else:
+                        messagebox.showerror("Error", "Failed converting AT3 audio.")
+
+                elif ext == 'pam':
+                    try:
+                        filename = os.path.basename(entry['path'])
+                        ffplay_path = subprocess.run(
+                            ['which', 'ffplay'] if os.name != 'nt' else ['where', 'ffplay'], capture_output=True, text=True).stdout.strip()
+                        if not ffplay_path:
+                            try:
+                                ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+                                potential_ffplay = ffmpeg_exe.replace('ffmpeg', 'ffplay').replace('FFMPEG', 'FFPLAY')
+                                if os.path.exists(potential_ffplay):
+                                    ffplay_path = potential_ffplay
+                            except:
+                                pass
+
+                        if ffplay_path:
+                            env = os.environ.copy()
+                            if "LD_LIBRARY_PATH" in env: 
+                                del env["LD_LIBRARY_PATH"]
+                            cmd = [ffplay_path, '-autoexit', '-window_title', filename, '-loop', '0', temp_path]
+                            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+                        else:
+                            messagebox.showwarning("Missing FFmpeg/ffplay")
+
+                    except Exception as e:
+                        messagebox.showerror("Error", f"Failed to play video: {e}")
+
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open the file:\n{str(e)}")
 
@@ -625,6 +755,7 @@ class PKGViewerApp(DragDropCTk):
         threading.Thread(target=self.extraction_worker, args=(None, dest, "all"), daemon=True).start()
 
 if __name__ == "__main__":
+    ctk.set_appearance_mode("dark")
     initial_pkg = sys.argv[1] if len(sys.argv) > 1 else None
     app = PKGViewerApp(initial_filepath=initial_pkg)
     app.mainloop()
