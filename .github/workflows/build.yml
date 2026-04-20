@@ -106,11 +106,12 @@ jobs:
       - name: Build Executable (Linux)
         if: ${{ matrix.os == 'ubuntu-latest' }}
         run: |
-          curl -L -o ffmpeg.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+          curl -L -o ffmpeg.tar.xz https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl-shared.tar.xz
+          mkdir temp_ffmpeg
+          tar -xJf ffmpeg.tar.xz -C temp_ffmpeg --strip-components=1
           mkdir -p linux/ffmpeg
-          tar -xJf ffmpeg.tar.xz -C linux/ffmpeg --strip-components=1
-          find linux/ffmpeg -type f ! -name 'ffplay' -delete
-          
+          cp temp_ffmpeg/bin/ffplay linux/ffmpeg/
+          cp -r temp_ffmpeg/lib/*.so* linux/ffmpeg/
           pyinstaller pkgview.py -w --noconfirm --onefile
           cp dist/pkgview linux/
           (cd linux/ && zip -r -X ../pkgview_Linux.zip .)
