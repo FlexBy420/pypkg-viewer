@@ -55,6 +55,39 @@ PKG_RELEASE_TYPE_RELEASE = 0x8000
 PKG_PLATFORM_TYPE_PS3 = 0x0001
 PKG_PLATFORM_TYPE_PSP_PSVITA = 0x0002
 
+PKG_CONTENT_TYPE_UNKNOWN_1      = 0x01 # ?
+PKG_CONTENT_TYPE_UNKNOWN_2      = 0x02 # ?
+PKG_CONTENT_TYPE_UNKNOWN_3      = 0x03 # ?
+PKG_CONTENT_TYPE_GAME_DATA      = 0x04 # GameData (also patches)
+PKG_CONTENT_TYPE_GAME_EXEC      = 0x05 # GameExec
+PKG_CONTENT_TYPE_PS1_EMU        = 0x06 # PS1emu
+PKG_CONTENT_TYPE_PC_ENGINE      = 0x07 # PSP & PCEngine
+PKG_CONTENT_TYPE_UNKNOWN_4      = 0x08 # ?
+PKG_CONTENT_TYPE_THEME          = 0x09 # Theme
+PKG_CONTENT_TYPE_WIDGET         = 0x0A # Widget
+PKG_CONTENT_TYPE_LICENSE        = 0x0B # License
+PKG_CONTENT_TYPE_VSH_MODULE     = 0x0C # VSHModule
+PKG_CONTENT_TYPE_PSN_AVATAR     = 0x0D # PSN Avatar
+PKG_CONTENT_TYPE_PSP_GO         = 0x0E # PSPgo
+PKG_CONTENT_TYPE_MINIS          = 0x0F # Minis
+PKG_CONTENT_TYPE_NEOGEO         = 0x10 # NEOGEO
+PKG_CONTENT_TYPE_VMC            = 0x11 # VMC
+PKG_CONTENT_TYPE_PS2_CLASSIC    = 0x12 # ?PS2Classic? Seen on PS2 classic
+PKG_CONTENT_TYPE_UNKNOWN_5      = 0x13 # ?
+PKG_CONTENT_TYPE_PSP_REMASTERED = 0x14 # ?
+PKG_CONTENT_TYPE_PSP2_GD        = 0x15 # PSVita Game Data
+PKG_CONTENT_TYPE_PSP2_AC        = 0x16 # PSVita Additional Content
+PKG_CONTENT_TYPE_PSP2_LA        = 0x17 # PSVita LiveArea
+PKG_CONTENT_TYPE_PSM_1          = 0x18 # PSVita PSM ?
+PKG_CONTENT_TYPE_WT             = 0x19 # Web TV ?
+PKG_CONTENT_TYPE_PS4_GD         = 0x1A # PS4 GameData
+PKG_CONTENT_TYPE_PS4_AC         = 0x1B # PS4 Additional Content
+PKG_CONTENT_TYPE_PS4_AL         = 0x1C # PS4 Additional License
+PKG_CONTENT_TYPE_PSM_2          = 0x1D # PSVita PSM ?
+PKG_CONTENT_TYPE_PS4_DP         = 0x1E # PS4 Delta Package/Patch
+PKG_CONTENT_TYPE_PSP2_THEME     = 0x1F # PSVita Theme
+PKG_CONTENT_TYPE_PS5_GD         = 0x20 # PS5 GameData
+
 def get_ffplay_path():
     if hasattr(sys, '_MEIPASS'):
         base_dir = os.path.dirname(sys.executable)
@@ -348,6 +381,84 @@ class PKGViewerApp(DragDropCTk):
         elif size >= 1024: return f"{size} ({size / 1024:.2f} KB)"
         else: return f"{size} ({size} B)"
 
+    def get_sfo_category_name(self, cat):
+        categories = {
+            "AP": "Application Photo",
+            "AM": "Application Music",
+            "AV": "Application Video",
+            "AS": "Application Streaming",
+            "AT": "Application TV",
+            "BV": "Broadcast Video",
+            "WT": "Web TV",
+            "HG": "HDD Game",
+            "CB": "Channel Broadcast",
+            "HM": "Home",
+            "SF": "Store Frontend",
+            "2G": "PS2 Game",
+            "2P": "PS2 Classic",
+            "1P": "PS1 Classic",
+            "MN": "Minis",
+            "PE": "PSP Emulation",
+            "PP": "PSP Package",
+            "GD": "Game Data",
+            "2D": "PS2 Data",
+            "SD": "Save Data",
+            "MS": "Memory Stick",
+        }
+        return categories.get(cat, "Unknown")
+
+    def get_pkg_content_type_name(self, type_id):
+        types = {
+            0x04: "Game Data / Patch",
+            0x05: "Game Executable",
+            0x06: "PS1 Emulator",
+            0x07: "PSP & PC Engine",
+            0x09: "Theme",
+            0x0A: "Widget",
+            0x0B: "License",
+            0x0C: "VSH Module",
+            0x0D: "PSN Avatar",
+            0x0E: "PSP Go",
+            0x0F: "Minis",
+            0x10: "NEOGEO",
+            0x11: "VMC",
+            0x12: "PS2 Classic",
+            0x14: "PSP Remaster",
+            0x15: "PS Vita Game Data",
+            0x16: "PS Vita Additional Content",
+            0x17: "PS Vita LiveArea",
+            0x18: "PS Mobile",
+            0x1F: "PS Vita Theme"
+        }
+        return types.get(type_id, f"Unknown (0x{type_id:02X})")
+
+    def get_sfo_sound_format(self, val):
+        if not isinstance(val, int):
+            return str(val)
+
+        formats = []
+        if val & (1 << 0): formats.append("LPCM 2 Ch.")
+        if val & (1 << 2): formats.append("LPCM 5.1 Ch.")
+        if val & (1 << 4): formats.append("LPCM 7.1 Ch.")
+        if val & (1 << 8): formats.append("Dolby Digital 5.1 Ch.")
+        if val & (1 << 9): formats.append("DTS 5.1 Ch.")
+
+        return ", ".join(formats) if formats else f"Unknown ({val})"
+
+    def get_sfo_resolution(self, val):
+        if not isinstance(val, int):
+            return str(val)
+
+        resolutions = []
+        if val & (1 << 0): resolutions.append("480")
+        if val & (1 << 1): resolutions.append("576")
+        if val & (1 << 2): resolutions.append("720")
+        if val & (1 << 3): resolutions.append("1080")
+        if val & (1 << 4): resolutions.append("480 (16:9)")
+        if val & (1 << 5): resolutions.append("576 (16:9)")
+
+        return ", ".join(resolutions) if resolutions else f"Unknown ({val})"
+
     def open_file(self):
         path = filedialog.askopenfilename(filetypes=[("PKG", ("*.pkg", "*.PKG"))])
         if path:
@@ -380,12 +491,16 @@ class PKGViewerApp(DragDropCTk):
                 self.klicensee = header[12]
 
                 npdrm_version = "N/A"
+                pkg_content_type_str = "N/A"
                 f.seek(meta_offset)
                 for _ in range(meta_count):
                     meta_id, meta_size = struct.unpack('>I I', f.read(8))
                     meta_data = f.read(meta_size)
                     if meta_id == 0x05 and meta_size >= 4:
                         npdrm_version = meta_data[:2].hex()
+                    elif meta_id == 0x02 and meta_size >= 4:
+                        ctype_val = struct.unpack('>I', meta_data[:4])[0]
+                        pkg_content_type_str = self.get_pkg_content_type_name(ctype_val)
 
                 entry_size = 32
                 raw_table = None
@@ -468,6 +583,7 @@ class PKGViewerApp(DragDropCTk):
                 pkg_info += f"Content ID:    {content_id}\n"
                 pkg_info += f"Platform:      {'PS3' if pkg_platform == PKG_PLATFORM_TYPE_PS3 else 'PSP/Vita'}\n"
                 pkg_info += f"Release Type:  {'Debug' if self.pkg_type == PKG_RELEASE_TYPE_DEBUG else 'Retail'}\n"
+                pkg_info += f"Content Type:  {pkg_content_type_str}\n"
                 pkg_info += f"Package Size:  {self.format_size(pkg_size)}\n"
                 pkg_info += f"NPDRM Version: {npdrm_version}\n"
                 pkg_info += f"QA Digest:     {self.qa_digest.hex().upper()}\n"
@@ -486,9 +602,11 @@ class PKGViewerApp(DragDropCTk):
                     comm_id = sfo_meta.get("NP_COMMUNICATION_ID", "N/A")
                     version = sfo_meta.get("VERSION", "N/A")
                     app_ver = sfo_meta.get("APP_VER", "N/A")
+                    tapp_ver = sfo_meta.get("TARGET_APP_VER", "N/A")
                     fw_ver = sfo_meta.get("PS3_SYSTEM_VER", "N/A")
                     parent_lvl = sfo_meta.get("PARENTAL_LEVEL", "N/A")
                     category = sfo_meta.get("CATEGORY", "N/A")
+                    category_desc = self.get_sfo_category_name(category)
                     sound_format = sfo_meta.get("SOUND_FORMAT", "N/A")
                     resolution = sfo_meta.get("RESOLUTION", "N/A")
                     attribute = sfo_meta.get("ATTRIBUTE", "N/A")
@@ -499,9 +617,12 @@ class PKGViewerApp(DragDropCTk):
                     sfo_info += f"Communication ID:     {comm_id}\n"
                     sfo_info += f"Version:              {version}\n"
                     sfo_info += f"App Version:          {app_ver}\n"
+                    sfo_info += f"Target App Version:   {tapp_ver}\n"
                     sfo_info += f"Firmware Version:     {fw_ver}\n"
                     sfo_info += f"Parental Level:       {parent_lvl}\n"
-                    sfo_info += f"Category:             {category}\n"
+                    sfo_info += f"Category:             {category} ({category_desc})\n"
+                    sfo_info += f"Resolution:           {self.get_sfo_resolution(resolution)}\n"
+                    sfo_info += f"Sound Format:         {self.get_sfo_sound_format(sound_format)}\n"
 
                     self.title(f"PKG Viewer - {title}")
                 else:
