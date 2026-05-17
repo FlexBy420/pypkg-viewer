@@ -911,7 +911,7 @@ class PKGViewerApp(DragDropCTk):
                 out_path = os.path.join(out_dir, fname)
                 with open(out_path, 'wb') as fh:
                     fh.write(data)
-                print(f"[icons] {entry['path']} → {out_path}")
+                print(f"[icons] {entry['path']} {out_path}")
                 extracted += 1
             except Exception as e:
                 print(f"[icons] Failed to extract {entry['path']}: {e}")
@@ -1128,7 +1128,7 @@ class PKGViewerApp(DragDropCTk):
         total         = len(files_to_process)
 
         for i, pkg_path in enumerate(files_to_process):
-            self.after(0, self.lbl_status.configure, text=f"Working {i + 1}/{total}...")
+            self.after(0, lambda i=i: self.lbl_status.configure(text=f"Working {i + 1}/{total}..."))
             success, msg = self.generate_json_for_pkg(pkg_path)
             if success:
                 success_count += 1
@@ -1194,10 +1194,10 @@ class PKGViewerApp(DragDropCTk):
             # Hash entire PKG file 
             if pre_hashes:
                 pkg_md5_str, pkg_sha1_str = pre_hashes
-                self.after(0, self.lbl_status.configure, text=f"Analyzing PKG... ({pkg_name})")
+                self.after(0, lambda: self.lbl_status.configure(text=f"Analyzing PKG... ({pkg_name})"))
                 self.after(0, self.progress_bar.set, 0)
             else:
-                self.after(0, self.lbl_status.configure, text=f"Hashing PKG... ({pkg_name})")
+                self.after(0, lambda: self.lbl_status.configure(text=f"Hashing PKG... ({pkg_name})"))
                 self.after(0, self.progress_bar.set, 0)
 
                 pkg_md5       = hashlib.md5()
@@ -1366,8 +1366,7 @@ class PKGViewerApp(DragDropCTk):
                 done_lock   = threading.Lock()
                 done_count  = [0]
 
-                self.after(0, self.lbl_status.configure,
-                           text=f"Hashing internal files 0/{total_files} ({pkg_name})")
+                self.after(0, lambda: self.lbl_status.configure(text=f"Hashing internal files 0/{total_files} ({pkg_name})"))
                 self.after(0, self.progress_bar.set, 0)
 
                 def hash_with_progress(entry):
@@ -1375,10 +1374,8 @@ class PKGViewerApp(DragDropCTk):
                     with done_lock:
                         done_count[0] += 1
                         done = done_count[0]
-                    self.after(0, self.lbl_status.configure,
-                               text=f"Hashing internal files {done}/{total_files} ({pkg_name})")
-                    self.after(0, self.progress_bar.set,
-                               done / total_files if total_files else 1)
+                    self.after(0, lambda done=done: self.lbl_status.configure(text=f"Hashing internal files {done}/{total_files} ({pkg_name})"))
+                    self.after(0, self.progress_bar.set,done / total_files if total_files else 1)
                     return result
 
                 with ThreadPoolExecutor(max_workers=n_workers) as pool:
@@ -1399,8 +1396,7 @@ class PKGViewerApp(DragDropCTk):
                         pkg_name=pkg_base_name,
                         content_id=content_id,
                     )
-                    self.after(0, self.lbl_status.configure,
-                               text=f"Extracted {icons_extracted} icon(s) → {icons_final_path}")
+                    self.after(0, lambda: self.lbl_status.configure(text=f"Extracted {icons_extracted} icon(s) {icons_final_path}"))
 
                 # Build JSON 
                 platform_str = "PS3" if pkg_platform == PKG_PLATFORM_TYPE_PS3 else "PSP/Vita"
@@ -1526,7 +1522,7 @@ class PKGViewerApp(DragDropCTk):
                         else:
                             status = f"[{current_idx+1}/{total}] {filename}: {mb_done:.0f} MB"
                             pct    = 0.0
-                        self.after(0, self.lbl_status.configure, text=status)
+                        self.after(0, lambda status=status: self.lbl_status.configure(text=status))
                         self.after(0, self.progress_bar.set, pct)
 
             pre_hashes = (pkg_md5.hexdigest(), pkg_sha1.hexdigest())
@@ -1568,7 +1564,7 @@ class PKGViewerApp(DragDropCTk):
                 if future.result():
                     success_count += 1
                 pct = (i + 1) / total
-                self.after(0, self.lbl_status.configure, text=f"Processed {i+1}/{total}...")
+                self.after(0, lambda i=i: self.lbl_status.configure(text=f"Processed {i+1}/{total}..."))
                 self.after(0, self.progress_bar.set, pct)
 
         self.after(0, lambda: messagebox.showinfo(
