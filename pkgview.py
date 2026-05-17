@@ -1554,7 +1554,7 @@ class PKGViewerApp(DragDropCTk):
         total         = len(urls)
         success_count = 0
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=1) as executor:
             futures = [
                 executor.submit(self.download_and_process_single,
                                 url, json_dir, base_dir, i, total)
